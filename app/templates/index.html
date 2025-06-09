@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NotebookLM Clone</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>NotebookLM Clone</h1>
+            <p>Upload documents and ask questions</p>
+        </header>
+        
+        <main>
+            <div class="upload-section">
+                <h2>Upload Documents</h2>
+                <form id="upload-form" enctype="multipart/form-data">
+                    <div class="file-upload">
+                        <label for="file-input">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <span>Choose a file or drag it here</span>
+                        </label>
+                        <input id="file-input" type="file" name="file" accept=".txt,.pdf">
+                    </div>
+                    <button type="submit" class="btn upload-btn">Upload</button>
+                </form>
+                <div id="upload-status" class="status"></div>
+                <!-- Add file info display area -->
+                <div id="file-info" class="file-info hidden">
+                    <div class="file-details">
+                        <i class="fas fa-file-alt file-icon"></i>
+                        <div>
+                            <span id="filename-display">No file selected</span>
+                            <span id="chunks-display" class="chunks-info"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-section">
+                <h2>Ask Questions</h2>
+                <div class="chat-container">
+                    <div id="chat-messages" class="chat-messages">
+                        <div class="message system">
+                            <p>Welcome! Upload a document and start asking questions.</p>
+                        </div>
+                    </div>
+                    <div class="chat-input">
+                        <input type="text" id="question-input" placeholder="Ask a question..." disabled>
+                        <button id="send-btn" disabled>
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <footer>
+            <p>Built with RAG (Retrieval-Augmented Generation) and Gemini API</p>
+        </footer>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
