@@ -1,182 +1,179 @@
 import os
-import json
 import uuid
-from flask import Flask, render_template, request, jsonify, session
-from werkzeug.utils import secure_filename
-import google.generativeai as genai
-from dotenv import load_dotenv
+import streamlit as st
 import PyPDF2
+from dotenv import load_dotenv
+import google.generativeai as genai
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
-import numpy as np
-import os.path
 
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__)
-app.secret_key = os.urandom(24)
-app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
-
 # Configure Gemini API
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key or api_key == "your_gemini_api_key_here":
+    st.error("ERROR: Gemini API key is not configured. Please check your environment variables.")
+    st.stop()
+genai.configure(api_key=api_key)
 model = genai.GenerativeModel('gemini-2.0-flash-lite')
 
-# Initialize vector store dictionary to store document embeddings for each session
-vector_stores = {}
+# Initialize session states
+if 'vector_stores' not in st.session_state:
+    st.session_state['vector_stores'] = {}
+if 'files_uploaded' not in st.session_state:
+    st.session_state['files_uploaded'] = {}
+if 'chat_history' not in st.session_state:
+    st.session_state['chat_history'] = []
 
-class RAGSystem:
-    def __init__(self):
-        self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+st.title("NotebookLMClone")
+
+# Clean up function for vector stores
+def cleanup_unused_stores():
+    data_dir = "data"
+    if os.path.exists(data_dir):
+        for item in os.listdir(data_dir):
+            if item.startswith("chroma_"):
+                path = os.path.join(data_dir, item)
+                file_id = item.replace("chroma_", "")
+                if os.path.isdir(path) and file_id not in st.session_state['vector_stores']:
+                    import shutil
+                    shutil.rmtree(path)
+
+# Sidebar for document management
+with st.sidebar:
+    st.header("Document Management")
+    uploaded_files = st.file_uploader(
+        "Upload PDF or TXT files", 
+        type=["pdf", "txt"], 
+        accept_multiple_files=True
+    )
     
-    def process_document(self, text, session_id):
-        # Split text into chunks
-        chunks = self.text_splitter.split_text(text)
-        
-        # Create a unique persist directory for each session
-        persist_directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', f'chroma_{session_id}')
-        
-        # Create vector store
-        vector_store = Chroma.from_texts(
-            texts=chunks, 
-            embedding=self.embeddings,
-            persist_directory=persist_directory
-        )
-        
-        # Save vector store for session
-        vector_stores[session_id] = vector_store
-        
-        return len(chunks)
-    
-    def query(self, question, session_id):
-        try:
-            print(f"Processing query for session: {session_id}")
-            print(f"Available sessions: {list(vector_stores.keys())}")
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            file_id = str(uuid.uuid4())
             
-            if session_id not in vector_stores:
-                print(f"Session {session_id} not found in vector_stores")
-                return "Please upload a document first."
-            
-            # Get the persist directory for this session
-            persist_directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', f'chroma_{session_id}')
-            
-            # If the directory doesn't exist, it means no document has been processed
-            if not os.path.exists(persist_directory):
-                print(f"Persist directory does not exist: {persist_directory}")
-                return "Please upload a document first."
+            # Process only if file hasn't been uploaded before
+            if uploaded_file.name not in st.session_state['files_uploaded']:
+                st.session_state['files_uploaded'][uploaded_file.name] = file_id
+                persist_directory = os.path.join("data", f"chroma_{file_id}")
+                os.makedirs(persist_directory, exist_ok=True)
                 
-            # Search for relevant documents
-            vector_store = vector_stores[session_id]
-            print(f"Searching for similar documents to: '{question}'")
-            docs = vector_store.similarity_search(question, k=3)
-            
-            if not docs:
-                print("No relevant documents found")
-                return "Sorry, I couldn't find any relevant information in the document to answer your question."
-            
-            # Create context from relevant documents
-            context = "\n\n".join([doc.page_content for doc in docs])
-            print(f"Found {len(docs)} relevant chunks")
-            
-            # Generate response using Gemini
-            prompt = f"""
-            Answer the question based on the following context:
-            
-            Context:
-            {context}
-            
-            Question: {question}
-            """
-            
-            print("Sending request to Gemini API...")
-            api_key = os.getenv("GEMINI_API_KEY")
-            if not api_key or api_key == "your_gemini_api_key_here":
-                print("WARNING: Gemini API key not properly configured")
-                return "ERROR: Gemini API key is not configured. Please check your .env file."
-            
-            response = model.generate_content(prompt)
-            return response.text
-            
-        except Exception as e:
-            import traceback
-            print(f"Error in RAG query: {str(e)}")
-            print(traceback.format_exc())
-            return f"An error occurred while processing your question: {str(e)}"
+                with st.spinner(f"Processing {uploaded_file.name}..."):
+                    text = ""
+                    if uploaded_file.name.endswith('.pdf'):
+                        pdf_reader = PyPDF2.PdfReader(uploaded_file)
+                        for page in pdf_reader.pages:
+                            text += page.extract_text()
+                    else:
+                        text = uploaded_file.read().decode('utf-8')
 
-# Initialize RAG system
-rag_system = RAGSystem()
-
-@app.route('/')
-def home():
-    # Initialize session if not already present
-    if 'session_id' not in session:
-        session['session_id'] = str(uuid.uuid4())
+                    # Split and embed
+                    embeddings = HuggingFaceEmbeddings(
+                        model_name="sentence-transformers/all-MiniLM-L6-v2"
+                    )
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=1000, 
+                        chunk_overlap=100
+                    )
+                    chunks = text_splitter.split_text(text)
+                    
+                    # Create vector store for this file
+                    vector_store = Chroma.from_texts(
+                        texts=chunks,
+                        embedding=embeddings,
+                        persist_directory=persist_directory
+                    )
+                    
+                    # Store in session state
+                    st.session_state['vector_stores'][file_id] = {
+                        'store': vector_store,
+                        'name': uploaded_file.name,
+                        'chunks': len(chunks)
+                    }
+                    st.success(f"✅ {uploaded_file.name} processed ({len(chunks)} chunks)")
     
-    return render_template('index.html')
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    
-    if file:
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
+    # Display currently loaded documents
+    if st.session_state['files_uploaded']:
+        st.markdown("---")
+        st.subheader("Loaded Documents")
+        for filename, file_id in st.session_state['files_uploaded'].items():
+            if file_id in st.session_state['vector_stores']:
+                doc_info = st.session_state['vector_stores'][file_id]
+                st.markdown(f"📄 **{filename}** ({doc_info['chunks']} chunks)")
         
-        text = ""
-        if filename.endswith('.pdf'):
-            # Extract text from PDF
-            with open(filepath, 'rb') as pdf_file:
-                pdf_reader = PyPDF2.PdfReader(pdf_file)
-                for page_num in range(len(pdf_reader.pages)):
-                    text += pdf_reader.pages[page_num].extract_text()
-        else:
-            # Assume it's a text file
-            with open(filepath, 'r', encoding='utf-8') as text_file:
-                text = text_file.read()
-        
-        # Process document
-        chunks_count = rag_system.process_document(text, session['session_id'])
-        
-        return jsonify({
-            'success': True,
-            'message': f'File uploaded and processed successfully. Created {chunks_count} chunks.',
-            'chunks_count': chunks_count
-        })
+        if st.button("Clear All Documents"):
+            st.session_state['vector_stores'] = {}
+            st.session_state['files_uploaded'] = {}
+            st.session_state['chat_history'] = []
+            cleanup_unused_stores()
+            st.rerun()
 
-@app.route('/query', methods=['POST'])
-def query():
-    data = request.get_json()
-    if not data or 'question' not in data:
-        return jsonify({'error': 'No question provided'}), 400
-    
-    if 'session_id' not in session:
-        return jsonify({'error': 'Session expired. Please refresh the page.'}), 400
-    
-    question = data['question']
-    try:
-        response = rag_system.query(question, session['session_id'])
-        if not response:
-            return jsonify({'error': 'No response generated'}), 500
-        
-        return jsonify({
-            'answer': response
-        })
-    except Exception as e:
-        import traceback
-        print("Error in query:", str(e))
-        print(traceback.format_exc())
-        return jsonify({'error': f'Error processing your question: {str(e)}'}), 500
+# Main chat interface
+st.header("Chat with your Documents")
 
-if __name__ == '__main__':
-    # Ensure upload folder exists
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    app.run(debug=True)
+# Display chat history
+for message in st.session_state.chat_history:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Chat input
+if question := st.chat_input("Ask a question about your documents..."):
+    if not st.session_state['vector_stores']:
+        st.warning("Please upload at least one document first.")
+    else:
+        # Display user message
+        with st.chat_message("user"):
+            st.markdown(question)
+        st.session_state.chat_history.append({"role": "user", "content": question})
+        
+        # Generate and display assistant response
+        with st.chat_message("assistant"):
+            with st.spinner("Searching through documents..."):
+                try:
+                    # Search across all loaded documents
+                    all_relevant_docs = []
+                    source_docs = {}
+                    
+                    for file_id, store_info in st.session_state['vector_stores'].items():
+                        docs = store_info['store'].similarity_search(question, k=2)
+                        if docs:
+                            all_relevant_docs.extend(docs)
+                            # Track which document each chunk came from
+                            for doc in docs:
+                                source_docs[doc.page_content] = store_info['name']
+                    
+                    # Sort by relevance (assuming the first results from each search are most relevant)
+                    all_relevant_docs = all_relevant_docs[:3]
+                    
+                    if not all_relevant_docs:
+                        response_text = "Sorry, I couldn't find any relevant information in the documents to answer your question."
+                    else:
+                        # Create context with source attribution
+                        context_parts = []
+                        for doc in all_relevant_docs:
+                            source = source_docs[doc.page_content]
+                            context_parts.append(f"From '{source}':\n{doc.page_content}")
+                        context = "\n\n".join(context_parts)
+                        
+                        prompt = f"""
+                        Answer the question based on the following context from multiple documents.
+                        Include relevant source document names in your answer.
+                        
+                        Context:
+                        {context}
+                        
+                        Question: {question}
+                        """
+                        
+                        response = model.generate_content(prompt)
+                        response_text = response.text
+                    
+                    st.markdown(response_text)
+                    st.session_state.chat_history.append({"role": "assistant", "content": response_text})
+                
+                except Exception as e:
+                    error_text = f"An error occurred: {str(e)}"
+                    st.error(error_text)
+                    st.session_state.chat_history.append({"role": "assistant", "content": f"❌ {error_text}"})

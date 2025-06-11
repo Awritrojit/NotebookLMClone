@@ -23,13 +23,16 @@ COPY . /app/
 # Copy the .env file if it exists
 #COPY .env /app/.env
 
-# Expose the port Render will use (adjust if needed)
-EXPOSE 5001
+# Create and set permissions for data directory
+RUN mkdir -p /app/data && chmod 777 /app/data
 
-# Set environment variables for Flask.
-ENV FLASK_APP=app/app.py
-ENV FLASK_RUN_HOST=0.0.0.0
-ENV FLASK_RUN_PORT=5001
+# Expose the port Streamlit will use
+EXPOSE 8501
 
-# Run the Flask app.
-CMD ["flask", "run", "--port=5001"]
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV STREAMLIT_SERVER_PORT=8501
+ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+
+# Run the Streamlit app
+CMD ["streamlit", "run", "app/app.py"]
