@@ -21,7 +21,7 @@ RUN pip install -r requirements.txt
 COPY . /app/
 
 # Copy the .env file if it exists
-COPY .env /app/.env
+#COPY .env /app/.env
 
 # Expose the port Render will use (adjust if needed)
 EXPOSE 5001
