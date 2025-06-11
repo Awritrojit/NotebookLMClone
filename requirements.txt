@@ -4,8 +4,8 @@ google-generativeai==0.3.1
 PyPDF2==3.0.1
 langchain==0.0.335
 langchain_community==0.0.13
-# Using Chroma for vector storage - more compatible with Python 3.12
-chromadb==0.4.18
+# Using Chroma for vector storage - more compatible with Python 3.11
+chromadb>=0.4.18
 # Dependencies for embeddings and processing
 sentence-transformers>=2.3.0
 numpy>=1.26.0
@@ -13,7 +13,8 @@ pandas>=2.0.0
 scikit-learn>=1.2.0
 # PyTorch with CPU only (remove cuda suffix for GPU support)
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch>=2.2.0
-tqdm==4.65.0
+torch>=2.1.0
+torchvision>=0.16.0
+tqdm>=4.65.0
 setuptools>=68.0.0
-streamlit
+streamlit>=1.29.0
